@@ -1,10 +1,14 @@
 use std::{
     fs::{self, File},
+    fmt::Write,
     io::{self, BufRead, BufReader, Error, Seek},
-    sync::{self, mpsc::Sender}, time::SystemTime,
+    sync::{self, mpsc::Sender}, 
+    thread,
+    time::SystemTime,
 };
 
 use notify::{self, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
+use minus::{dynamic_paging, Pager, LineNumbers};
 
 struct FileEventHandler {
     id: String,
@@ -141,7 +145,19 @@ fn main() -> () {
     let mut insert = conn.prepare("INSERT INTO log (file_id, message) VALUES (?, ?)")
         .unwrap();
 
-    // watch
+    // Initialize pager with line numbers
+    let pager = Pager::new();
+    pager.set_line_numbers(LineNumbers::Enabled).unwrap();
+    
+    // Clone pager for the dynamic paging thread
+    let pager_clone = pager.clone();
+    
+    // Start the pager in a separate thread
+    let _pager_thread = thread::spawn(move || {
+        dynamic_paging(pager_clone).unwrap();
+    });
+    
+    // watch files for changes
     for msg in rx {
         for line in msg.lines.into_iter() {
             let insert_result = insert.execute((&msg.file_id, line));
@@ -150,6 +166,7 @@ fn main() -> () {
             }
         }
         
+        // Query all logs from database
         let logs = query
             .query_map([], |row| {
                 let file_id: String = row.get("file_id").unwrap();
@@ -158,7 +175,16 @@ fn main() -> () {
                 Ok(line)
             })
             .unwrap();
-        println!("CURRENT:");
-        logs.for_each(|msg| println!(">> {}", msg.unwrap()))
+        
+        // Collect all log lines into a single string
+        let mut log_content = String::new();
+        for log_result in logs {
+            if let Ok(line) = log_result {
+                writeln!(&mut log_content, "{}", line).unwrap();
+            }
+        }
+        
+        // Update the pager with the new content
+        pager.push_str(&log_content).unwrap();
     }
 }
