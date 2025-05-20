@@ -15,9 +15,12 @@ struct FileEventHandler {
 
 impl notify::EventHandler for FileEventHandler {
     fn handle_event(&mut self, event: notify::Result<notify::Event>) {
+        if !should_read_file(&event) {
+            return;
+        }
         eprintln!("event: {:?}", event);
         let pos = self.last_read_file_pos;
-        let result = get_lines_from_position(event, &mut self.file_handle, pos);
+        let result = get_lines_from_position(&mut self.file_handle, pos);
         if let Some(a) = result {
             let msg = LogsMessage {
                 file_id: self.id.clone(),
@@ -41,50 +44,50 @@ struct GetLinesResult {
     new_file_len: u64
 }
 
-fn get_lines_from_position(event: notify::Result<notify::Event>, file_handle: &mut File, start_pos: u64) -> Option<GetLinesResult> {
+fn should_read_file(event: &notify::Result<notify::Event>) -> bool {
     match event {
         Ok(_event) => {
             use notify::{event::*, EventKind::*};
             if _event.kind != Access(AccessKind::Close(AccessMode::Write)) {
                 // ignore any event that is not a close write
                 // i.e. we don't care about any "intermediate" write states, just the final one
-                return Option::None;
+                return false;
             }
-
-            let file_len = file_handle.metadata().unwrap().len();
-            // eprintln!("for file {:?}", _event);
-            // println!("for file {}", _event.paths.into_iter().map(|pb| pb.display().to_string()).collect::<Vec<_>>().join(":"));
-            // println!("current cursor pos: {}", pos);
-            // eprintln!("current file len:   {}", file_len);
-
-            // ignore any event that didn't change the pos
-            if file_len == start_pos {
-                // eprintln!("ignore as file length = cursor pos");
-                return Option::None;
-            }
-
-            // read from pos to end of file
-            let mut lines = Vec::new();
-            file_handle.seek(io::SeekFrom::Start(start_pos)).unwrap();
-            let reader = BufReader::new(file_handle);
-            for line_res in reader.lines() {
-                let line = line_res.unwrap();
-                if line.len() == 0 {
-                    continue;
-                }
-                // else parse line, add to db?
-                lines.push(line)
-            }
-            Option::Some(GetLinesResult {
-                lines: lines,
-                new_file_len: file_len
-            })
+            return true;
         }
         Err(error) => {
-            eprintln!("{error:?}");
-            Option::None
+            eprintln!("event error: {:?}", error);
+            return false;
         }
     }
+}
+
+fn get_lines_from_position(file_handle: &mut File, start_pos: u64) -> Option<GetLinesResult> {
+    let file_len = file_handle.metadata().unwrap().len();
+    eprintln!("read from {} to {}", start_pos, file_len);
+
+    // ignore any event that didn't change the pos
+    if file_len == start_pos {
+        eprintln!("ignore event as file length = cursor pos");
+        return Option::None;
+    }
+
+    // read from pos to end of file
+    let mut lines = Vec::new();
+    file_handle.seek(io::SeekFrom::Start(start_pos)).unwrap();
+    let reader = BufReader::new(file_handle);
+    for line_res in reader.lines() {
+        let line = line_res.unwrap();
+        if line.len() == 0 {
+            continue;
+        }
+        // else parse line, add to db?
+        lines.push(line)
+    }
+    Option::Some(GetLinesResult {
+        lines: lines,
+        new_file_len: file_len
+    })
 }
 
 fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, Error> {
@@ -140,8 +143,6 @@ fn main() -> () {
 
     // watch
     for msg in rx {
-        eprintln!("got message");
-        // INSERT INTO table_name (column1, column2) VALUES (?, ?), (?, ?);
         for line in msg.lines.into_iter() {
             let insert_result = insert.execute((&msg.file_id, line));
             if let Err(err) = insert_result {
