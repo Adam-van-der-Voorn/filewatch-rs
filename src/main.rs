@@ -5,10 +5,27 @@ use std::{
     sync::{self, mpsc::Sender}, 
     thread,
     time::SystemTime,
+    path::PathBuf,
 };
 
 use notify::{self, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use minus::{dynamic_paging, Pager, LineNumbers};
+use log::{debug, error, info, LevelFilter};
+use simplelog::{CombinedLogger, Config, TermLogger, WriteLogger, TerminalMode, ColorChoice};
+use clap::Parser;
+
+/// A file watcher and log aggregator
+#[derive(Parser, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    /// Files to watch
+    #[clap(required = true)]
+    files: Vec<String>,
+    
+    /// Enable debug logging to a file (default: filewatch.log)
+    #[clap(short = 'o', long)]
+    debug_output: Option<PathBuf>,
+}
 
 struct FileEventHandler {
     id: String,
@@ -22,7 +39,7 @@ impl notify::EventHandler for FileEventHandler {
         if !should_read_file(&event) {
             return;
         }
-        eprintln!("event: {:?}", event);
+        debug!("Event: {:?}", event);
         let pos = self.last_read_file_pos;
         let result = get_lines_from_position(&mut self.file_handle, pos);
         if let Some(a) = result {
@@ -32,7 +49,7 @@ impl notify::EventHandler for FileEventHandler {
             };
             match self.tx.send(msg) {
                 Ok(_) => { self.last_read_file_pos = a.new_file_len },
-                Err(_) => eprintln!("file event handler {} failed to send", &self.id)
+                Err(_) => error!("File event handler {} failed to send", &self.id)
             }
         }        
     }
@@ -60,7 +77,7 @@ fn should_read_file(event: &notify::Result<notify::Event>) -> bool {
             return true;
         }
         Err(error) => {
-            eprintln!("event error: {:?}", error);
+            error!("Event error: {:?}", error);
             return false;
         }
     }
@@ -68,11 +85,11 @@ fn should_read_file(event: &notify::Result<notify::Event>) -> bool {
 
 fn get_lines_from_position(file_handle: &mut File, start_pos: u64) -> Option<GetLinesResult> {
     let file_len = file_handle.metadata().unwrap().len();
-    eprintln!("read from {} to {}", start_pos, file_len);
+    debug!("Reading from position {} to {}", start_pos, file_len);
 
     // ignore any event that didn't change the pos
     if file_len == start_pos {
-        eprintln!("ignore event as file length = cursor pos");
+        debug!("Ignoring event as file length = cursor position");
         return Option::None;
     }
 
@@ -112,7 +129,38 @@ fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, 
 }
 
 fn main() -> () {
-    let file_paths: Vec<String> = std::env::args().skip(1).collect();
+    // Parse command line arguments
+    let args = Args::parse();
+    
+    // Configure logger based on debug_output option
+    if let Some(log_path) = &args.debug_output {
+        // Open existing file in append mode or create if it doesn't exist
+        let log_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(log_path)
+            .expect("Failed to open log file");
+        
+        CombinedLogger::init(vec![
+            // Terminal logger is turned off to keep terminal clean for the pager
+            TermLogger::new(LevelFilter::Off, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
+            // File logger with debug level
+            WriteLogger::new(LevelFilter::Debug, Config::default(), log_file),
+        ]).unwrap();
+        
+        info!("Debug logging enabled to file: {}", log_path.display());
+    } else {
+        // Initialize with Off level to suppress all output
+        CombinedLogger::init(vec![
+            TermLogger::new(LevelFilter::Off, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
+        ]).unwrap();
+    }
+    
+    // Use the files from parsed arguments
+    let file_paths = args.files;
+    info!("Watching files: {:?}", file_paths);
+    
     // let watchers = vec![];
     let (tx, rx) = sync::mpsc::channel();
 
@@ -120,7 +168,7 @@ fn main() -> () {
         let tx_clone = tx.clone();        
         std::thread::spawn(move || {
             if let Err(e) = watch_file(&path, tx_clone) {
-                eprintln!("Error tailing file {}: {}", &path, e);
+                error!("Error tailing file {}: {}", &path, e);
             }
         });
     }
@@ -129,9 +177,14 @@ fn main() -> () {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_millis();
-
-    let conn = rusqlite::Connection::open(format!("./db/{}.db3", ts))
+    
+    let db_path = format!("./db/{}.db3", ts);
+    debug!("Creating database at {}", db_path);
+    
+    let conn = rusqlite::Connection::open(&db_path)
         .expect("failed to open db");
+    
+    debug!("Database opened successfully");
 
     conn.execute(
         "CREATE TABLE log ( id INTEGER PRIMARY KEY, file_id TEXT NOT NULL, message TEXT NOT NULL )",
@@ -153,8 +206,11 @@ fn main() -> () {
     let pager_clone = pager.clone();
     
     // Start the pager in a separate thread
+    info!("Starting pager");
     let _pager_thread = thread::spawn(move || {
-        dynamic_paging(pager_clone).unwrap();
+        if let Err(e) = dynamic_paging(pager_clone) {
+            error!("Pager error: {}", e);
+        }
     });
     
     // watch files for changes
@@ -162,7 +218,7 @@ fn main() -> () {
         for line in msg.lines.into_iter() {
             let insert_result = insert.execute((&msg.file_id, line));
             if let Err(err) = insert_result {
-                eprintln!("failed to insert ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
+                error!("Failed to insert to database ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
             }
         }
         
