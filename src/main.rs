@@ -37,6 +37,7 @@ struct FileEventHandler {
 impl notify::EventHandler for FileEventHandler {
     fn handle_event(&mut self, event: notify::Result<notify::Event>) {
         if !should_read_file(&event) {
+            debug!("Skip Event: {:?}", event);
             return;
         }
         debug!("Event: {:?}", event);

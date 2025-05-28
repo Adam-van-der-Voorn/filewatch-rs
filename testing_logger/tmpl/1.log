@@ -1,10 +1,10 @@
-2025-01-15 09:00:00 [INFO] Application started successfully
-2025-01-15 09:00:05 [DEBUG] Loading configuration file
-2025-01-15 09:00:10 [INFO] Database connection established
-2025-01-15 09:00:15 [WARN] High memory usage detected
-2025-01-15 09:00:20 [ERROR] Failed to connect to external service
-2025-01-15 09:00:25 [INFO] Retrying connection attempt
-2025-01-15 09:00:30 [INFO] Connection successful
-2025-01-15 09:00:35 [DEBUG] Processing user request
-2025-01-15 09:00:40 [INFO] Request completed successfully
-2025-01-15 09:00:45 [INFO] Application shutting down
+[INFO] Application started successfully
+[DEBUG] Loading configuration file
+[INFO] Database connection established
+[WARN] High memory usage detected
+[ERROR] Failed to connect to external service
+[INFO] Retrying connection attempt
+[INFO] Connection successful
+[DEBUG] Processing user request
+[INFO] Request completed successfully
+[INFO] Application shutting down

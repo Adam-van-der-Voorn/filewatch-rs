@@ -1,10 +1,10 @@
-2025-01-15 10:30:00 [INFO] Service initialization complete
-2025-01-15 10:30:05 [DEBUG] Validating input parameters
-2025-01-15 10:30:10 [INFO] Processing batch job #001
-2025-01-15 10:30:15 [WARN] Slow query detected (2.5s)
-2025-01-15 10:30:20 [ERROR] Timeout occurred during operation
-2025-01-15 10:30:25 [INFO] Fallback mechanism activated
-2025-01-15 10:30:30 [DEBUG] Cache miss for key user_123
-2025-01-15 10:30:35 [INFO] Data synchronization completed
-2025-01-15 10:30:40 [WARN] Disk space running low (15% remaining)
-2025-01-15 10:30:45 [INFO] Maintenance window scheduled
+[INFO] Service initialization complete
+[DEBUG] Validating input parameters
+[INFO] Processing batch job #001
+[WARN] Slow query detected (2.5s)
+[ERROR] Timeout occurred during operation
+[INFO] Fallback mechanism activated
+[DEBUG] Cache miss for key user_123
+[INFO] Data synchronization completed
+[WARN] Disk space running low (15% remaining)
+[INFO] Maintenance window scheduled
