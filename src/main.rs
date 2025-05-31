@@ -36,23 +36,41 @@ struct FileEventHandler {
 
 impl notify::EventHandler for FileEventHandler {
     fn handle_event(&mut self, event: notify::Result<notify::Event>) {
-        if !should_read_file(&event) {
+        if !should_handle_event(&event) {
             debug!("Skip Event: {:?}", event);
             return;
         }
         debug!("Event: {:?}", event);
         let pos = self.last_read_file_pos;
-        let result = get_lines_from_position(&mut self.file_handle, pos);
-        if let Some(a) = result {
+        // ignore any event that didn't change the pos
+        let file_len = self.file_handle.metadata().unwrap().len();
+        if file_len == pos {
+            debug!("Ignoring event as file length = cursor position");
+        }
+        else if file_len < pos {
             let msg = LogsMessage {
                 file_id: self.id.clone(),
-                lines: a.lines,
+                lines: vec![format!("filewatch: File truncated to position {file_len}")],
             };
             match self.tx.send(msg) {
-                Ok(_) => { self.last_read_file_pos = a.new_file_len },
-                Err(_) => error!("File event handler {} failed to send", &self.id)
+                Ok(_) => { /* noop */ },
+                Err(_) => error!("File event handler {} failed to send (meta)", &self.id)
             }
-        }        
+            self.last_read_file_pos = file_len;
+        }
+        else {
+            let result = get_lines_for_interval(&mut self.file_handle, pos, file_len);
+            if let Some(lines) = result {
+                let msg = LogsMessage {
+                    file_id: self.id.clone(),
+                    lines: lines,
+                };
+                match self.tx.send(msg) {
+                    Ok(_) => { self.last_read_file_pos = file_len },
+                    Err(_) => error!("File event handler {} failed to send", &self.id)
+                }
+            }        
+        }
     }
 }
 
@@ -61,21 +79,19 @@ struct LogsMessage {
     file_id: String,
 }
 
-struct GetLinesResult {
-    lines: Vec<String>,
-    new_file_len: u64
-}
 
-fn should_read_file(event: &notify::Result<notify::Event>) -> bool {
-    match event {
-        Ok(_event) => {
-            use notify::{event::*, EventKind::*};
-            if _event.kind != Access(AccessKind::Close(AccessMode::Write)) {
-                // ignore any event that is not a close write
-                // i.e. we don't care about any "intermediate" write states, just the final one
-                return false;
+fn should_handle_event(event_res: &notify::Result<notify::Event>) -> bool {
+    match event_res {
+        Ok(event) => {
+            use notify::{event::*};
+            match event.kind {
+                EventKind::Modify(kind) => {
+                    kind != ModifyKind::Metadata(MetadataKind::Any) &&
+                    kind != ModifyKind::Name(RenameMode::Any)
+                    },
+                _ => false
+
             }
-            return true;
         }
         Err(error) => {
             error!("Event error: {:?}", error);
@@ -84,15 +100,10 @@ fn should_read_file(event: &notify::Result<notify::Event>) -> bool {
     }
 }
 
-fn get_lines_from_position(file_handle: &mut File, start_pos: u64) -> Option<GetLinesResult> {
-    let file_len = file_handle.metadata().unwrap().len();
-    debug!("Reading from position {} to {}", start_pos, file_len);
+fn get_lines_for_interval(file_handle: &mut File, start_pos: u64, end_pos: u64) -> Option<Vec<String>> {
+    assert!(start_pos < end_pos);
 
-    // ignore any event that didn't change the pos
-    if file_len == start_pos {
-        debug!("Ignoring event as file length = cursor position");
-        return Option::None;
-    }
+    debug!("Reading from position {} to {}", start_pos, end_pos);
 
     // read from pos to end of file
     let mut lines = Vec::new();
@@ -106,10 +117,7 @@ fn get_lines_from_position(file_handle: &mut File, start_pos: u64) -> Option<Get
         // else parse line, add to db?
         lines.push(line)
     }
-    Option::Some(GetLinesResult {
-        lines: lines,
-        new_file_len: file_len
-    })
+    Option::Some(lines)
 }
 
 fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, Error> {
@@ -242,6 +250,6 @@ fn main() -> () {
         }
         
         // Update the pager with the new content
-        pager.push_str(&log_content).unwrap();
+        pager.set_text(&log_content).unwrap();
     }
 }

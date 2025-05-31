@@ -1,10 +1,10 @@
-[INFO] Application started successfully
-[DEBUG] Loading configuration file
-[INFO] Database connection established
-[WARN] High memory usage detected
-[ERROR] Failed to connect to external service
-[INFO] Retrying connection attempt
-[INFO] Connection successful
-[DEBUG] Processing user request
-[INFO] Request completed successfully
-[INFO] Application shutting down
+[INFO]  1. Application started successfully
+[DEBUG] 2. Loading configuration file
+[INFO]  3. Database connection established
+[WARN]  4. High memory usage detected
+[ERROR] 5. Failed to connect to external service
+[INFO]  6. Retrying connection attempt
+[INFO]  7. Connection successful
+[DEBUG] 8. Processing user request
+[INFO]  9. Request completed successfully
+[INFO]  X. Application shutting down
