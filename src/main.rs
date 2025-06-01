@@ -121,12 +121,31 @@ fn get_lines_for_interval(file_handle: &mut File, start_pos: u64, end_pos: u64) 
 }
 
 fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, Error> {
-    let file_handle = fs::File::open(path)
+    let mut file_handle = fs::File::open(path)
         .unwrap();
+    let id = path.clone();
+
+    // first event, read existing file
+    let file_len = file_handle.metadata().unwrap().len();
+    let result = get_lines_for_interval(&mut file_handle, 0, file_len);
+    let last_read = match result {
+        Some(lines) => {
+            let msg = LogsMessage {
+                file_id: id.clone(),
+                lines: lines,
+            };
+            match tx.send(msg) {
+                Ok(_) => { file_len },
+                Err(_) => { error!("File event handler {} failed to send", &id); 0 }
+            }
+        }
+        None => 0   
+    };
+
     let event_handler = FileEventHandler {
         file_handle, tx,
-        id: path.clone(),
-        last_read_file_pos: 0,
+        id: id,
+        last_read_file_pos: last_read,
     };
 
     let mut watcher = RecommendedWatcher::new(event_handler, notify::Config::default())
@@ -222,8 +241,8 @@ fn main() -> () {
         }
     });
     
-    // watch files for changes
     for msg in rx {
+        // Insert new rows
         for line in msg.lines.into_iter() {
             let insert_result = insert.execute((&msg.file_id, line));
             if let Err(err) = insert_result {
