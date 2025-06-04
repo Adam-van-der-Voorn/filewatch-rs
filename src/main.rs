@@ -1,15 +1,12 @@
 use std::{
     fs::{self, File},
-    fmt::Write,
-    io::{self, BufRead, BufReader, Error, Seek},
+    io::{self, BufRead, BufReader, Seek},
     sync::{self, mpsc::Sender}, 
-    thread,
     time::SystemTime,
     path::PathBuf,
 };
 
 use notify::{self, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
-use minus::{dynamic_paging, Pager, LineNumbers};
 use log::{debug, error, info, LevelFilter};
 use simplelog::{CombinedLogger, Config, TermLogger, WriteLogger, TerminalMode, ColorChoice};
 use clap::Parser;
@@ -26,6 +23,85 @@ struct Args {
     #[clap(short = 'o', long)]
     debug_output: Option<PathBuf>,
 }
+
+use std::time::{Duration, Instant};
+
+use crossterm::event::{self, KeyCode};
+use ratatui::{layout::{Constraint, Layout}, text::{Span}};
+use ratatui::style::{Stylize};
+use ratatui::text::{Line};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use ratatui::Frame;
+
+#[derive(Default)]
+struct App {
+    pub vertical_scroll_state: ScrollbarState,
+    pub vertical_scroll_pos: usize,
+    pub vertical_scroll_len: usize,
+    pub logs: Vec<String>,
+}
+
+impl App {
+    fn scroll_down(&mut self) {
+        self.vertical_scroll_pos = self.vertical_scroll_pos
+            .saturating_add(1)
+            .min(self.logs.len().saturating_sub(1));
+        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
+    }
+
+    const fn scroll_to_bottom(&mut self) {
+        self.vertical_scroll_pos = self.vertical_scroll_len.saturating_sub(1);
+        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
+    }
+
+    const fn scroll_up(&mut self) {
+        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_sub(1);
+        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
+    }
+
+    fn set_log_lines(&mut self, logs: Vec<String>) {
+        if logs.len() > self.logs.len() {
+            // self.scroll_to_bottom()
+        }
+        self.vertical_scroll_state = self.vertical_scroll_state.content_length(logs.len());
+        self.logs = logs;
+
+    }
+
+    #[expect(clippy::too_many_lines, clippy::cast_possible_truncation)]
+    fn render(&mut self, frame: &mut Frame) {
+        let area = frame.area();
+        let chunks = Layout::vertical([
+            Constraint::Percentage(100),
+            Constraint::Min(1),
+        ])
+        .split(area);
+
+        let text: Vec<Line<'_>> = self.logs.iter()
+            .map(|log| Line::from(log.as_str()))
+            .collect();
+
+        self.vertical_scroll_state = self.vertical_scroll_state.content_length(text.len());
+        self.vertical_scroll_len = text.len();
+
+        let title = Block::new()
+            .title(Span::from("filewatch").underlined() + Span::from("  Use j k or ▲ ▼ to scroll").blue());
+        frame.render_widget(title, chunks[1]);
+        let paragraph = Paragraph::new(text.clone())
+            .wrap(Wrap { trim: false })
+            .block(Block::new())
+            .scroll((self.vertical_scroll_pos as u16, 0));
+        
+        frame.render_widget(paragraph, chunks[0]);
+        let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("░")
+            .begin_symbol(Option::None)
+            .end_symbol(Option::None)
+            .track_symbol(Some("|"));
+        frame.render_stateful_widget(sb, chunks[0], &mut self.vertical_scroll_state);
+    }
+}
+
 
 struct FileEventHandler {
     id: String,
@@ -120,7 +196,7 @@ fn get_lines_for_interval(file_handle: &mut File, start_pos: u64, end_pos: u64) 
     Option::Some(lines)
 }
 
-fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, Error> {
+fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, io::Error> {
     let mut file_handle = fs::File::open(path)
         .unwrap();
     let id = path.clone();
@@ -226,30 +302,39 @@ fn main() -> () {
     let mut insert = conn.prepare("INSERT INTO log (file_id, message) VALUES (?, ?)")
         .unwrap();
 
-    // Initialize pager with line numbers
-    let pager = Pager::new();
-    pager.set_line_numbers(LineNumbers::Enabled).unwrap();
-    
-    // Clone pager for the dynamic paging thread
-    let pager_clone = pager.clone();
-    
-    // Start the pager in a separate thread
-    info!("Starting pager");
-    let _pager_thread = thread::spawn(move || {
-        if let Err(e) = dynamic_paging(pager_clone) {
-            error!("Pager error: {}", e);
-        }
-    });
-    
-    for msg in rx {
-        // Insert new rows
-        for line in msg.lines.into_iter() {
-            let insert_result = insert.execute((&msg.file_id, line));
-            if let Err(err) = insert_result {
-                error!("Failed to insert to database ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
+    let mut terminal = ratatui::init();
+    let mut app = App::default();
+    let tick_rate = Duration::from_millis(250);
+    let mut last_tick = Instant::now();
+    loop {
+        terminal.draw(|frame| app.render(frame)).expect("draw should work");
+        let elapsed_time = last_tick.elapsed();
+        let timeout = tick_rate.saturating_sub(elapsed_time);
+        if event::poll(timeout).expect("bad poll") {
+            log::debug!("event recived");
+            if let Some(key) = event::read().unwrap().as_key_press_event() {
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::Char('g') => app.scroll_to_bottom(),
+                    KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
+                    KeyCode::Char('k') | KeyCode::Up => app.scroll_up(),
+                    _ => {}
+                }
             }
         }
-        
+
+        //hmm
+        let iter = rx.try_iter();
+        for msg in iter {
+            // Insert new rows
+            for line in msg.lines.into_iter() {
+                let insert_result = insert.execute((&msg.file_id, line));
+                if let Err(err) = insert_result {
+                    error!("Failed to insert to database ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
+                }
+            }
+        }
+
         // Query all logs from database
         let logs = query
             .query_map([], |row| {
@@ -261,14 +346,19 @@ fn main() -> () {
             .unwrap();
         
         // Collect all log lines into a single string
-        let mut log_content = String::new();
+        let mut log_content = vec![];
         for log_result in logs {
             if let Ok(line) = log_result {
-                writeln!(&mut log_content, "{}", line).unwrap();
+                log_content.push(line)
+            }
+            else {
+                log::error!("bad log")
             }
         }
-        
-        // Update the pager with the new content
-        pager.set_text(&log_content).unwrap();
+
+        app.set_log_lines(log_content);
+        last_tick = Instant::now();
+
     }
+    ratatui::restore();
 }
