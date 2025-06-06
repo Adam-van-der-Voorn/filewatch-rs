@@ -1,9 +1,5 @@
 use std::{
-    fs::{self, File},
-    io::{self, BufRead, BufReader, Seek},
-    sync::{self, mpsc::Sender}, 
-    time::SystemTime,
-    path::PathBuf,
+    fs::{self, File}, io::{self, BufRead, BufReader, Seek}, path::PathBuf, sync::{self, mpsc::Sender}, time::SystemTime, usize
 };
 
 use notify::{self, INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
@@ -27,11 +23,70 @@ struct Args {
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, KeyCode};
-use ratatui::{layout::{Constraint, Layout}, text::{Span}};
+use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, style::Style, text::Span, widgets::Widget};
 use ratatui::style::{Stylize};
 use ratatui::text::{Line};
 use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 use ratatui::Frame;
+
+struct LogsWidget {
+    scroll_y : u16,
+    pub logs: Vec<String>,
+}
+
+impl LogsWidget {
+    pub fn new(logs: Vec<String>) -> Self {
+        LogsWidget { scroll_y: 0, logs }
+    }
+
+    fn render_width_marker(&self, area: Rect, buf: &mut Buffer) {
+        let width: usize = area.width.into();
+        let mut width_str = String::new();
+        width_str.push('x');
+        for _ in 0..width-2 {
+            width_str.push_str(format!("-").as_str())
+        }
+        width_str.push('x');
+        buf.set_stringn(area.x, area.y, width_str, usize::MAX, Style::default());
+    }
+
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub const fn scroll(mut self, y: u16) -> Self {
+        self.scroll_y = y;
+        self
+    } 
+}
+
+impl Widget for LogsWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.render_width_marker(area, buf);
+        
+        let width: usize = area.width.into();
+        let mut yy = 1;
+        
+        for log in self.logs {
+            let mut line = String::new();
+            for c in log.chars() {
+                line.push(c);
+                if line.len() >= width {
+                    let y_pos = area.y + yy;
+                    if y_pos < area.height {
+                        buf.set_stringn(area.x, area.y + yy, &line, usize::MAX, Style::default());
+                    }
+                    line = String::new();
+                    yy += 1;
+                } 
+            }
+            let y_pos = area.y + yy;
+            if y_pos < area.height {
+                buf.set_stringn(area.x, area.y + yy, &line, usize::MAX, Style::default());
+            }
+            yy += 1
+        }
+
+
+    }
+}
 
 #[derive(Default)]
 struct App {
@@ -68,7 +123,6 @@ impl App {
 
     }
 
-    #[expect(clippy::too_many_lines, clippy::cast_possible_truncation)]
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let chunks = Layout::vertical([
@@ -77,6 +131,22 @@ impl App {
         ])
         .split(area);
 
+        let title = Block::new()
+            .title(Span::from("filewatch").underlined() + Span::from("  Use j k or ▲ ▼ to scroll").blue());
+        frame.render_widget(title, chunks[1]);
+        self.render_logs(frame, chunks[0])
+
+    }
+
+    #[allow(unused)]
+    fn render_logs(&mut self, frame: &mut Frame, area: Rect) {
+        let lw = LogsWidget::new(self.logs.clone())
+            .scroll(0);
+        frame.render_widget(lw, area)
+    }
+
+    #[allow(unused)]
+    fn render_logs_as_paragraph(&mut self, frame: &mut Frame, area: Rect) {
         let text: Vec<Line<'_>> = self.logs.iter()
             .map(|log| Line::from(log.as_str()))
             .collect();
@@ -84,21 +154,18 @@ impl App {
         self.vertical_scroll_state = self.vertical_scroll_state.content_length(text.len());
         self.vertical_scroll_len = text.len();
 
-        let title = Block::new()
-            .title(Span::from("filewatch").underlined() + Span::from("  Use j k or ▲ ▼ to scroll").blue());
-        frame.render_widget(title, chunks[1]);
         let paragraph = Paragraph::new(text.clone())
             .wrap(Wrap { trim: false })
             .block(Block::new())
             .scroll((self.vertical_scroll_pos as u16, 0));
         
-        frame.render_widget(paragraph, chunks[0]);
+        frame.render_widget(paragraph, area);
         let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("░")
             .begin_symbol(Option::None)
             .end_symbol(Option::None)
             .track_symbol(Some("|"));
-        frame.render_stateful_widget(sb, chunks[0], &mut self.vertical_scroll_state);
+        frame.render_stateful_widget(sb, area, &mut self.vertical_scroll_state);
     }
 }
 
