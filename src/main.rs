@@ -25,8 +25,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, KeyCode};
 use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, style::Style, text::Span, widgets::Widget};
 use ratatui::style::{Stylize};
-use ratatui::text::{Line};
-use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use ratatui::widgets::{Block};
 use ratatui::Frame;
 
 struct LogsWidget {
@@ -143,35 +142,25 @@ impl Widget for LogsWidget {
 
 #[derive(Default)]
 struct App {
-    pub vertical_scroll_state: ScrollbarState,
     pub vertical_scroll_pos: usize,
-    pub vertical_scroll_len: usize,
     pub logs: Vec<String>,
 }
 
 impl App {
     fn scroll_down(&mut self) {
         self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_add(1);
-        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
     }
 
-    const fn scroll_to_bottom(&mut self) {
-        self.vertical_scroll_pos = self.vertical_scroll_len.saturating_sub(1);
-        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
+    fn scroll_to_bottom(&mut self) {
+        log::info!("not implemented");
     }
 
     const fn scroll_up(&mut self) {
         self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_sub(1);
-        self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
     }
 
     fn set_log_lines(&mut self, logs: Vec<String>) {
-        if logs.len() > self.logs.len() {
-            // self.scroll_to_bottom()
-        }
-        self.vertical_scroll_state = self.vertical_scroll_state.content_length(logs.len());
         self.logs = logs;
-
     }
 
     fn render(&mut self, frame: &mut Frame) {
@@ -189,34 +178,10 @@ impl App {
 
     }
 
-    #[allow(unused)]
     fn render_logs(&mut self, frame: &mut Frame, area: Rect) {
         let lw = LogsWidget::new(self.logs.clone())
             .scroll(self.vertical_scroll_pos);
         frame.render_widget(lw, area)
-    }
-
-    #[allow(unused)]
-    fn render_logs_as_paragraph(&mut self, frame: &mut Frame, area: Rect) {
-        let text: Vec<Line<'_>> = self.logs.iter()
-            .map(|log| Line::from(log.as_str()))
-            .collect();
-
-        self.vertical_scroll_state = self.vertical_scroll_state.content_length(text.len());
-        self.vertical_scroll_len = text.len();
-
-        let paragraph = Paragraph::new(text.clone())
-            .wrap(Wrap { trim: false })
-            .block(Block::new())
-            .scroll((self.vertical_scroll_pos as u16, 0));
-        
-        frame.render_widget(paragraph, area);
-        let sb = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("░")
-            .begin_symbol(Option::None)
-            .end_symbol(Option::None)
-            .track_symbol(Some("|"));
-        frame.render_stateful_widget(sb, area, &mut self.vertical_scroll_state);
     }
 }
 
