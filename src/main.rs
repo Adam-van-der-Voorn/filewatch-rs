@@ -30,7 +30,7 @@ use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, Scroll
 use ratatui::Frame;
 
 struct LogsWidget {
-    scroll_y : u16,
+    scroll_y : usize,
     pub logs: Vec<String>,
 }
 
@@ -39,6 +39,7 @@ impl LogsWidget {
         LogsWidget { scroll_y: 0, logs }
     }
 
+    #[allow(unused)]
     fn render_width_marker(&self, area: Rect, buf: &mut Buffer) {
         let width: usize = area.width.into();
         let mut width_str = String::new();
@@ -50,23 +51,21 @@ impl LogsWidget {
         buf.set_stringn(area.x, area.y, width_str, usize::MAX, Style::default());
     }
 
-    #[must_use = "method moves the value of self and returns the modified value"]
-    pub const fn scroll(mut self, y: u16) -> Self {
-        self.scroll_y = y;
-        self
-    } 
-}
-
-impl Widget for LogsWidget {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.render_width_marker(area, buf);
-        
+    fn render_logs(&self, area: Rect, buf: &mut Buffer) {
         let width: usize = area.width.into();
-        let mut yy = 1;
-        
-        for log in self.logs {
+        let mut yy = 0;
+        let (log_idx, char_offset) = self.get_page_index(area);
+        let mut char_offset = char_offset;
+        let logs_page = self.logs.get(log_idx..)
+            .unwrap_or_default();
+        for log in logs_page.iter() {
             let mut line = String::new();
             for c in log.chars() {
+                if char_offset > 0 {
+                    // discard
+                    char_offset -= 1;
+                    continue;
+                }
                 line.push(c);
                 if line.len() >= width {
                     let y_pos = area.y + yy;
@@ -83,8 +82,62 @@ impl Widget for LogsWidget {
             }
             yy += 1
         }
+    }
 
+    /// Calculates which log entry and character offset to start rendering from based on scroll position.
+    /// 
+    /// This function handles text wrapping by calculating how many screen lines each log entry
+    /// occupies given the terminal width, then determines where to start rendering based on
+    /// the current scroll position.
+    /// 
+    /// # Arguments
+    /// * `area` - The rendering area containing width and height information
+    /// 
+    /// # Returns
+    /// A tuple `(log_index, char_offset)` where:
+    /// * `log_index` - Index of the log entry to start rendering from
+    /// * `char_offset` - Number of characters to skip within that log entry
+    /// 
+    /// # Example
+    /// Given logs with wrapping at width=10:
+    /// - Log 0: "hello world!" (12 chars = 2 lines)  
+    /// - Log 1: "short" (5 chars = 1 line)
+    /// - Log 2: "very long message here" (22 chars = 3 lines)
+    /// 
+    /// If scroll_y=3, this would return (2, 10) meaning start at log 2,
+    /// skip 10 characters (start from "message here").
+    fn get_page_index(&self, area: Rect) -> (usize, usize) {
+        let width: usize = area.width.into();
+        let target_line = self.scroll_y as usize;
+        
+        let mut current_line = 0;
+        
+        for (log_idx, log) in self.logs.iter().enumerate() {
+            let log_chars = log.chars().count();
+            let lines_for_this_log = if log_chars == 0 { 1 } else { (log_chars + width - 1) / width };
+            if current_line + lines_for_this_log > target_line {
+                let lines_into_log = target_line - current_line;
+                let char_offset = lines_into_log * width;
+                return (log_idx, char_offset);
+            }
+            
+            current_line += lines_for_this_log;
+        }
+        
+        (self.logs.len().saturating_sub(1), 0)
+    }
 
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub const fn scroll(mut self, y: usize) -> Self {
+        self.scroll_y = y;
+        self
+    } 
+}
+
+impl Widget for LogsWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // self.render_width_marker(area, buf);
+        self.render_logs(area, buf);
     }
 }
 
@@ -98,9 +151,7 @@ struct App {
 
 impl App {
     fn scroll_down(&mut self) {
-        self.vertical_scroll_pos = self.vertical_scroll_pos
-            .saturating_add(1)
-            .min(self.logs.len().saturating_sub(1));
+        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_add(1);
         self.vertical_scroll_state = self.vertical_scroll_state.position(self.vertical_scroll_pos);
     }
 
@@ -141,7 +192,7 @@ impl App {
     #[allow(unused)]
     fn render_logs(&mut self, frame: &mut Frame, area: Rect) {
         let lw = LogsWidget::new(self.logs.clone())
-            .scroll(0);
+            .scroll(self.vertical_scroll_pos);
         frame.render_widget(lw, area)
     }
 
