@@ -23,19 +23,24 @@ struct Args {
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, KeyCode};
-use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, style::Style, text::Span, widgets::Widget};
+use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, style::Style, text::Span, widgets::StatefulWidget};
 use ratatui::style::{Stylize};
 use ratatui::widgets::{Block};
 use ratatui::Frame;
 
 struct LogsWidget {
-    scroll_y : usize,
     pub logs: Vec<String>,
+    pub scroll_y: usize,
+}
+
+#[derive(Default)]
+struct LogsWidgetState {
+    pub actual_scroll_y: usize,
 }
 
 impl LogsWidget {
     pub fn new(logs: Vec<String>) -> Self {
-        LogsWidget { scroll_y: 0, logs }
+        LogsWidget { logs, scroll_y: 0 }
     }
 
     #[allow(unused)]
@@ -50,12 +55,11 @@ impl LogsWidget {
         buf.set_stringn(area.x, area.y, width_str, usize::MAX, Style::default());
     }
 
-    fn render_logs(&self, area: Rect, buf: &mut Buffer) {
+    fn render_logs(&self, area: Rect, buf: &mut Buffer, state: &mut LogsWidgetState) {
         let width: usize = area.width.into();
         let mut yy = 0;
         let (log_idx, char_offset, scroll_y_actual) = self.get_page_index(area);
-        // TODO: we need to somehow persist scroll_y_actual
-        // and update app.vertical_scroll_pos
+        state.actual_scroll_y = scroll_y_actual;
         let mut char_offset = char_offset;
         let logs_page = self.logs.get(log_idx..)
             .unwrap_or_default();
@@ -110,7 +114,7 @@ impl LogsWidget {
     /// skip 10 characters (start from "message here").
     fn get_page_index(&self, area: Rect) -> (usize, usize, usize) {
         let width: usize = area.width.into();
-        let target_line = self.scroll_y as usize;
+        let target_line = self.scroll_y;
         
         let mut current_line = 0;
         
@@ -146,10 +150,12 @@ impl LogsWidget {
     } 
 }
 
-impl Widget for LogsWidget {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl StatefulWidget for LogsWidget {
+    type State = LogsWidgetState;
+    
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         // self.render_width_marker(area, buf);
-        self.render_logs(area, buf);
+        self.render_logs(area, buf, state);
     }
 }
 
@@ -157,6 +163,7 @@ impl Widget for LogsWidget {
 struct App {
     pub vertical_scroll_pos: usize,
     pub logs: Vec<String>,
+    pub logs_widget_state: LogsWidgetState,
 }
 
 impl App {
@@ -194,7 +201,8 @@ impl App {
     fn render_logs(&mut self, frame: &mut Frame, area: Rect) {
         let lw = LogsWidget::new(self.logs.clone())
             .scroll(self.vertical_scroll_pos);
-        frame.render_widget(lw, area)
+        frame.render_stateful_widget(lw, area, &mut self.logs_widget_state);
+        self.vertical_scroll_pos = self.logs_widget_state.actual_scroll_y;
     }
 }
 
