@@ -110,7 +110,7 @@ impl LogsWidget {
     /// skip 10 characters (start from "message here").
     fn get_page_index(&self, area: Rect) -> (usize, usize, usize) {
         let width: usize = area.width.into();
-        let target_line = self.scroll_y_intended as usize;
+        let target_line = self.scroll_y as usize;
         
         let mut current_line = 0;
         
