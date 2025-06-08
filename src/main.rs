@@ -172,7 +172,7 @@ impl App {
     }
 
     fn scroll_to_bottom(&mut self) {
-        log::info!("not implemented");
+        self.vertical_scroll_pos = usize::MAX;
     }
 
     const fn scroll_up(&mut self) {
