@@ -53,7 +53,9 @@ impl LogsWidget {
     fn render_logs(&self, area: Rect, buf: &mut Buffer) {
         let width: usize = area.width.into();
         let mut yy = 0;
-        let (log_idx, char_offset) = self.get_page_index(area);
+        let (log_idx, char_offset, scroll_y_actual) = self.get_page_index(area);
+        // TODO: we need to somehow persist scroll_y_actual
+        // and update app.vertical_scroll_pos
         let mut char_offset = char_offset;
         let logs_page = self.logs.get(log_idx..)
             .unwrap_or_default();
@@ -93,9 +95,10 @@ impl LogsWidget {
     /// * `area` - The rendering area containing width and height information
     /// 
     /// # Returns
-    /// A tuple `(log_index, char_offset)` where:
+    /// A tuple `(log_index, char_offset, line_offset)` where:
     /// * `log_index` - Index of the log entry to start rendering from
     /// * `char_offset` - Number of characters to skip within that log entry
+    /// * `line_offset` - Actual number of lines scrolled. 
     /// 
     /// # Example
     /// Given logs with wrapping at width=10:
@@ -103,11 +106,11 @@ impl LogsWidget {
     /// - Log 1: "short" (5 chars = 1 line)
     /// - Log 2: "very long message here" (22 chars = 3 lines)
     /// 
-    /// If scroll_y=3, this would return (2, 10) meaning start at log 2,
+    /// If scroll_y=3, this would return (2, 10, 3) meaning start at log 2,
     /// skip 10 characters (start from "message here").
-    fn get_page_index(&self, area: Rect) -> (usize, usize) {
+    fn get_page_index(&self, area: Rect) -> (usize, usize, usize) {
         let width: usize = area.width.into();
-        let target_line = self.scroll_y as usize;
+        let target_line = self.scroll_y_intended as usize;
         
         let mut current_line = 0;
         
@@ -117,7 +120,7 @@ impl LogsWidget {
             if current_line + lines_for_this_log > target_line {
                 let lines_into_log = target_line - current_line;
                 let char_offset = lines_into_log * width;
-                return (log_idx, char_offset);
+                return (log_idx, char_offset, current_line + lines_into_log);
             }
             
             current_line += lines_for_this_log;
@@ -130,10 +133,10 @@ impl LogsWidget {
             let lines_for_this_log = if log_chars == 0 { 1 } else { (log_chars + width - 1) / width };
             let lines_into_log = lines_for_this_log.saturating_sub(1);
             let char_offset = lines_into_log * width;
-            return (log_idx, char_offset);
+            return (log_idx, char_offset, current_line.saturating_sub(1));
         }
 
-        (0, 0)
+        (0, 0, 0)
     }
 
     #[must_use = "method moves the value of self and returns the modified value"]
