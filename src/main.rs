@@ -123,7 +123,17 @@ impl LogsWidget {
             current_line += lines_for_this_log;
         }
         
-        (self.logs.len().saturating_sub(1), 0)
+        // user has scrolled below last line
+        if let Some(log) = self.logs.last() {
+            let log_idx = self.logs.len().saturating_sub(1);
+            let log_chars = log.chars().count();
+            let lines_for_this_log = if log_chars == 0 { 1 } else { (log_chars + width - 1) / width };
+            let lines_into_log = lines_for_this_log.saturating_sub(1);
+            let char_offset = lines_into_log * width;
+            return (log_idx, char_offset);
+        }
+
+        (0, 0)
     }
 
     #[must_use = "method moves the value of self and returns the modified value"]
