@@ -36,6 +36,8 @@ struct LogsWidget {
 #[derive(Default)]
 struct LogsWidgetState {
     pub actual_scroll_y: usize,
+    pub was_at_bottom: bool,
+    pub last_log_count: usize,
 }
 
 impl LogsWidget {
@@ -56,10 +58,36 @@ impl LogsWidget {
     }
 
     fn render_logs(&self, area: Rect, buf: &mut Buffer, state: &mut LogsWidgetState) {
+        // Check if new logs arrived and we were at bottom
+        let input_log_count = self.logs.len();
+        let new_logs_arrived = input_log_count > state.last_log_count;
+        
+        // Create a mutable copy of scroll_y for potential auto-scroll
+        let scroll_y = if new_logs_arrived && state.was_at_bottom {
+            // Auto-scroll to bottom when new logs arrive
+            usize::MAX
+        } else {
+            self.scroll_y
+        };
+
+        log::debug!("render with vals: input_lc={} last_lc={} new_logs?={} was_at_bottom={} scroll_in={} scroll={}",
+            input_log_count,
+            state.last_log_count,
+            new_logs_arrived,
+            state.was_at_bottom,
+            self.scroll_y,
+            scroll_y,
+        );
+        
         let width: usize = area.width.into();
         let mut yy = 0;
-        let (log_idx, char_offset, scroll_y_actual) = self.get_page_index(area);
+        let (log_idx, char_offset, scroll_y_actual, at_bottom) = self.get_page_index(area, scroll_y);
+        
+        // Update state
         state.actual_scroll_y = scroll_y_actual;
+        state.last_log_count = input_log_count;
+        state.was_at_bottom = at_bottom;
+
         let mut char_offset = char_offset;
         let logs_page = self.logs.get(log_idx..)
             .unwrap_or_default();
@@ -97,12 +125,14 @@ impl LogsWidget {
     /// 
     /// # Arguments
     /// * `area` - The rendering area containing width and height information
+    /// * `scroll_y` - The line to start from
     /// 
     /// # Returns
     /// A tuple `(log_index, char_offset, line_offset)` where:
     /// * `log_index` - Index of the log entry to start rendering from
     /// * `char_offset` - Number of characters to skip within that log entry
-    /// * `line_offset` - Actual number of lines scrolled. 
+    /// * `line_offset` - Actual number of lines scrolled.
+    /// * `at_bottom` - true if the line_offset returned is the last line
     /// 
     /// # Example
     /// Given logs with wrapping at width=10:
@@ -112,35 +142,35 @@ impl LogsWidget {
     /// 
     /// If scroll_y=3, this would return (2, 10, 3) meaning start at log 2,
     /// skip 10 characters (start from "message here").
-    fn get_page_index(&self, area: Rect) -> (usize, usize, usize) {
+    fn get_page_index(&self, area: Rect, scroll_y: usize) -> (usize, usize, usize, bool) {
         let width: usize = area.width.into();
-        let target_line = self.scroll_y;
+        let target_line = scroll_y;
         
         let mut current_line = 0;
         
         for (log_idx, log) in self.logs.iter().enumerate() {
+            let is_last_log = log_idx == self.logs.len() - 1;
             let log_chars = log.chars().count();
             let lines_for_this_log = if log_chars == 0 { 1 } else { (log_chars + width - 1) / width };
             if current_line + lines_for_this_log > target_line {
                 let lines_into_log = target_line - current_line;
                 let char_offset = lines_into_log * width;
-                return (log_idx, char_offset, current_line + lines_into_log);
+                let at_bottom = is_last_log && lines_into_log == lines_for_this_log.saturating_sub(1);
+                return (log_idx, char_offset, current_line + lines_into_log, at_bottom);
+            }
+            else if is_last_log {
+                // user has scrolled below last line
+                let lines_into_log = lines_for_this_log.saturating_sub(1);
+                let char_offset = lines_into_log * width;
+                let at_bottom = true;
+                return (log_idx, char_offset, current_line + lines_into_log, at_bottom);
             }
             
             current_line += lines_for_this_log;
         }
         
-        // user has scrolled below last line
-        if let Some(log) = self.logs.last() {
-            let log_idx = self.logs.len().saturating_sub(1);
-            let log_chars = log.chars().count();
-            let lines_for_this_log = if log_chars == 0 { 1 } else { (log_chars + width - 1) / width };
-            let lines_into_log = lines_for_this_log.saturating_sub(1);
-            let char_offset = lines_into_log * width;
-            return (log_idx, char_offset, current_line.saturating_sub(1));
-        }
-
-        (0, 0, 0)
+        // no logs
+        (0, 0, 0, true)
     }
 
     #[must_use = "method moves the value of self and returns the modified value"]
@@ -281,7 +311,10 @@ fn should_handle_event(event_res: &notify::Result<notify::Event>) -> bool {
 }
 
 fn get_lines_for_interval(file_handle: &mut File, start_pos: u64, end_pos: u64) -> Option<Vec<String>> {
-    assert!(start_pos < end_pos);
+    if start_pos > end_pos {
+        log::info!("will not read file, start pos ({start_pos}) > end pos ({end_pos})");
+        return Option::Some(vec![]);
+    }
 
     debug!("Reading from position {} to {}", start_pos, end_pos);
 
