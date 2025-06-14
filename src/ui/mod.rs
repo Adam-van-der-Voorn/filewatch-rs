@@ -12,10 +12,11 @@ struct LogsWidget {
 }
 
 #[derive(Default)]
-struct LogsWidgetState {
+pub struct LogsWidgetState {
     pub actual_scroll_y: usize,
     pub was_at_bottom: bool,
     pub last_log_count: usize,
+    pub height: u16,
 }
 
 impl LogsWidget {
@@ -65,6 +66,7 @@ impl LogsWidget {
         state.actual_scroll_y = scroll_y_actual;
         state.last_log_count = input_log_count;
         state.was_at_bottom = at_bottom;
+        state.height = area.height;
 
         let mut char_offset = char_offset;
         let logs_page = self.logs.get(log_idx..)
@@ -169,20 +171,20 @@ impl StatefulWidget for LogsWidget {
 pub struct App {
     vertical_scroll_pos: usize,
     logs: Vec<String>,
-    logs_widget_state: LogsWidgetState,
+    pub logs_widget_state: LogsWidgetState,
 }
 
 impl App {
-    pub fn scroll_down(&mut self) {
-        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_add(1);
+    pub fn scroll_down(&mut self, scroll_amount: usize) {
+        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_add(scroll_amount);
     }
 
-    pub fn scroll_to_bottom(&mut self) {
-        self.vertical_scroll_pos = usize::MAX;
+    pub fn scroll_up(&mut self, scroll_amount: usize) {
+        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_sub(scroll_amount);
     }
 
-    pub const fn scroll_up(&mut self) {
-        self.vertical_scroll_pos = self.vertical_scroll_pos.saturating_sub(1);
+    pub fn set_scroll(&mut self, scroll_pos: usize) {
+      self.vertical_scroll_pos = scroll_pos;
     }
 
     pub fn set_log_lines(&mut self, logs: Vec<String>) {

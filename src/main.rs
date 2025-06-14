@@ -1,7 +1,7 @@
 mod file_watch;
 mod ui;
 
-use std::{fs, sync};
+use std::{fs, sync, usize};
 use std::path::PathBuf;
 use log::{debug, error, info, LevelFilter};
 use simplelog::{CombinedLogger, Config, TermLogger, WriteLogger, TerminalMode, ColorChoice};
@@ -100,6 +100,7 @@ fn main() -> () {
     let mut last_tick = Instant::now();
     loop {
         terminal.draw(|frame| app.render(frame)).expect("draw should work");
+        let page_size = app.logs_widget_state.height;
         let elapsed_time = last_tick.elapsed();
         let timeout = tick_rate.saturating_sub(elapsed_time);
         if event::poll(timeout).expect("bad poll") {
@@ -107,9 +108,11 @@ fn main() -> () {
             if let Some(key) = event::read().unwrap().as_key_press_event() {
                 match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::Char('g') => app.scroll_to_bottom(),
-                    KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
-                    KeyCode::Char('k') | KeyCode::Up => app.scroll_up(),
+                    KeyCode::Char('g') => app.set_scroll(usize::MAX),
+                    KeyCode::Char('j') | KeyCode::Down => app.scroll_down(1),
+                    KeyCode::Char('k') | KeyCode::Up => app.scroll_up(1),
+                    KeyCode::PageUp => app.scroll_up(page_size.into()),
+                    KeyCode::PageDown => app.scroll_down(page_size.into()),
                     _ => {}
                 }
             }
