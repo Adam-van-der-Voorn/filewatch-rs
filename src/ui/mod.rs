@@ -199,10 +199,12 @@ impl App {
         ])
         .split(area);
 
+        self.render_logs(frame, chunks[0]);
+        
+        let info_str = format!("  {}", self.logs_widget_state.actual_scroll_y.saturating_add(1));
         let title = Block::new()
-            .title(Span::from("filewatch").underlined() + Span::from("  Use j k or ▲ ▼ to scroll").blue());
+            .title(Span::from("filewatch").underlined() + Span::from(info_str).blue());
         frame.render_widget(title, chunks[1]);
-        self.render_logs(frame, chunks[0])
 
     }
 
