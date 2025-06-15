@@ -1,6 +1,7 @@
 mod file_watch;
 mod ui;
 
+use std::collections::HashMap;
 use std::{fs, sync, usize};
 use std::path::PathBuf;
 use log::{debug, error, info, LevelFilter};
@@ -55,6 +56,7 @@ fn main() -> () {
     
     // Use the files from parsed arguments
     let file_paths = args.files;
+    let file_tags = get_file_tags(&file_paths);
     info!("Watching files: {:?}", file_paths);
     
     // let watchers = vec![];
@@ -125,7 +127,7 @@ fn main() -> () {
             for line in msg.lines.into_iter() {
                 let insert_result = insert.execute((&msg.file_id, line));
                 if let Err(err) = insert_result {
-                    error!("Failed to insert to database ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
+                   log::error!("Failed to insert to database ({:?}): {:?}", err.sqlite_error_code(), err.sqlite_error());
                 }
             }
         }
@@ -135,7 +137,9 @@ fn main() -> () {
             .query_map([], |row| {
                 let file_id: String = row.get("file_id").unwrap();
                 let message: String = row.get("message").unwrap();
-                let line = format!("{}: {}", file_id, message);
+                let default_log_prefix = &String::from(" >");
+                let log_prefix = file_tags.get(&file_id).unwrap_or(default_log_prefix);
+                let line = format!("{} {}", log_prefix, message);
                 Ok(line)
             })
             .unwrap();
@@ -156,4 +160,18 @@ fn main() -> () {
 
     }
     ratatui::restore();
+}
+
+
+fn get_file_tags(file_names: &[String]) -> HashMap<String, String> {
+    if file_names.len() <= 1 {
+        let key = file_names[0].clone();
+        let val = String::from(" >");
+        return HashMap::from([(key, val); 1])
+    }
+    else {
+        return file_names.into_iter()
+            .map(|n| (n.clone(), n.clone()))
+            .collect()
+    }
 }
