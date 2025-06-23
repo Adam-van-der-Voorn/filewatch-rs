@@ -3,14 +3,14 @@ use std::io::{BufRead, BufReader, Seek};
 use std::{fs, io};
 use std::sync::mpsc::Sender;
 
-use notify::{INotifyWatcher, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 pub struct LogsMessage {
     pub lines: Vec<String>,
     pub file_id: String,
 }
 
-pub fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<INotifyWatcher, io::Error> {
+pub fn watch_file(path: &String, tx: Sender<LogsMessage>) -> Result<RecommendedWatcher, io::Error> {
     let mut file_handle = fs::File::open(path)
         .unwrap();
     let id = path.clone();
