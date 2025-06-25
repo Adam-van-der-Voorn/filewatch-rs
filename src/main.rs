@@ -2,7 +2,7 @@ mod file_watch;
 mod ui;
 
 use std::collections::HashMap;
-use std::{fs, sync, usize};
+use std::{env, fs, sync, usize};
 use std::path::PathBuf;
 use log::{debug, error, info, LevelFilter};
 use simplelog::{CombinedLogger, Config, TermLogger, WriteLogger, TerminalMode, ColorChoice};
@@ -75,9 +75,37 @@ fn main() -> () {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_millis();
-    
-    let db_path = format!("./db/{}.db3", ts);
-    debug!("Creating database at {}", db_path);
+
+    let os = env::consts::OS;
+    let db_path = if os == "macos" {
+        let home = env::var("HOME")
+            .expect("macos: HOME environment variable not set");
+        let home = PathBuf::from(home);
+        if !home.exists() {
+            panic!("macos: HOME ({}) does not exist", home.to_string_lossy());
+        }
+        if !home.is_dir() {
+            panic!("macos: HOME ({}) is not dir", home.to_string_lossy());
+        }
+        let dir = home
+            .join("Library")
+            .join("Application Support")
+            .join("nz.adamv.Filewatch")
+            .join("db");
+        let file = format!("{}.db3", ts);
+        fs::create_dir_all(&dir)
+            .expect("create dir for db failed");
+        dir.join(file)
+    }
+    else {
+        let dir = PathBuf::from("./db");
+        let file = format!("{}.db3", ts);
+        fs::create_dir_all(&dir)
+            .expect("create dir for db failed");
+        dir.join(file)
+    };
+
+    debug!("Creating database at {:?}", db_path);
     
     let conn = rusqlite::Connection::open(&db_path)
         .expect("failed to open db");
